@@ -1,10 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 )
@@ -31,51 +31,54 @@ func tick(ticker *time.Ticker, duration time.Duration, done chan bool) {
 	}
 }
 
-func cleanup() {
-	fmt.Println("\n\rTimer stopped")
-}
-
 func main() {
-	task_duration := time.Duration(5) * time.Second
-	break_duration := time.Duration(3) * time.Second
 
-	argLeng := len(os.Args[1:])
-	if argLeng > 0 {
-		// should be in mm:ss form
-		minutes, has_errors := strconv.ParseInt(os.Args[1], 10, 0)
-		if has_errors != nil {
-			task_duration = time.Duration(minutes) * time.Minute
-		} else {
-			fmt.Println("Error while parsing. Using default value (50 min)")
-		}
-	}
+	var task_duration_minutes int
+	var break_duration_minutes int
+	var session_break_duration_minutes int
+	var task_per_session int
 
-	// Creates a channel for OS signals
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		cleanup()
-		os.Exit(0)
-	}()
+	flag.IntVar(&task_duration_minutes, "d", DEFAULT_TASK_MINUTES, "Sets task duration")
+	flag.IntVar(&break_duration_minutes, "b", DEFAULT_BREAK_MINUTES, "Sets break duration")
+	flag.IntVar(&session_break_duration_minutes, "s", DEFAULT_LONG_BREAK_MINUTES, "Sets session break duration")
+	flag.IntVar(&task_per_session, "t", DEFAULT_TASK_FOR_SESSION, "Sets task per session")
+
+	flag.Parse()
+
+	task_duration := time.Duration(DEFAULT_TASK_MINUTES) * time.Minute
+	break_duration := time.Duration(DEFAULT_BREAK_MINUTES) * time.Minute
 
 	// Creates a ticker and a channel
 	ticker := time.NewTicker(1 * time.Second)
 	done := make(chan bool)
 
+	// Creates a channel for OS signals
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c // waits for channel
+		ticker.Stop()
+		done <- true
+		os.Exit(0)
+	}()
+	tasks := 1
 	for {
-		// task
 		println("\nTask")
 		go tick(ticker, task_duration, done)
 		<-done
 		done <- false
+
+		// After 4 tasks the break must be longer
+		if tasks > 4 {
+			tasks = 0
+			break_duration = time.Duration(DEFAULT_LONG_BREAK_MINUTES) * time.Minute
+		}
+
 		println("\nBreak")
 		go tick(ticker, break_duration, done)
 		<-done
 		done <- false
+		// restore break duration
+		break_duration = time.Duration(DEFAULT_BREAK_MINUTES) * time.Minute
 	}
-	// Executes tick asyncronusly
-
-	ticker.Stop()
-	done <- true
 }
